@@ -46,6 +46,9 @@ let wsConnected = false;
 let sessionId = null;
 let manualSessionEnded = false;
 let pendingStartAfterReconnect = false;
+let wsReconnectAttempts = 0;
+let wsReconnectTimer = null;
+let wsConnecting = false;
 
 const startBtn = document.getElementById("startBtn");
 const nextBtn = document.getElementById("nextBtn");
@@ -720,6 +723,8 @@ async function startInterviewFlow() {
       setAlerts(["Reconnecting... starting interview when ready."]);
       return;
     }
+    pendingStartAfterReconnect = true;
+    connectSocket();
     setAlerts(["Waiting for server websocket..."]);
     return;
   }
@@ -750,6 +755,12 @@ async function startInterviewFlow() {
 
 function attachSocketHandlers(socket, candidateIndex) {
   socket.onopen = () => {
+    wsConnecting = false;
+    wsReconnectAttempts = 0;
+    if (wsReconnectTimer) {
+      clearTimeout(wsReconnectTimer);
+      wsReconnectTimer = null;
+    }
     wsConnected = true;
     wsStatus.textContent = "connected";
     if (!isRunning) {
@@ -770,6 +781,10 @@ function attachSocketHandlers(socket, candidateIndex) {
       pendingStartAfterReconnect = false;
       startInterviewFlow();
     }
+  };
+
+  socket.onerror = () => {
+    wsStatus.textContent = "connecting";
   };
 
   socket.onmessage = (event) => {
@@ -908,6 +923,7 @@ function attachSocketHandlers(socket, candidateIndex) {
   };
 
   socket.onclose = () => {
+    wsConnecting = false;
     wsConnected = false;
     wsStatus.textContent = manualSessionEnded ? "ended" : "disconnected";
     if (manualSessionEnded) {
@@ -920,17 +936,36 @@ function attachSocketHandlers(socket, candidateIndex) {
     if (candidateIndex + 1 < wsCandidates.length) {
       connectSocket(candidateIndex + 1);
     } else {
-      isRunning = false;
-      cleanupMedia();
-      setAlerts(["WebSocket disconnected"]);
+      const delayMs = Math.min(20000, 1200 * Math.pow(1.8, Math.min(wsReconnectAttempts, 8)));
+      wsReconnectAttempts += 1;
+      wsStatus.textContent = "reconnecting";
+      setAlerts([
+        `WebSocket disconnected. Retrying in ${Math.max(1, Math.round(delayMs / 1000))}s...`,
+      ]);
+      if (wsReconnectTimer) {
+        clearTimeout(wsReconnectTimer);
+      }
+      wsReconnectTimer = window.setTimeout(() => {
+        wsReconnectTimer = null;
+        if (!manualSessionEnded && !wsConnected) {
+          connectSocket(0);
+        }
+      }, delayMs);
     }
   };
 }
 
 function connectSocket(candidateIndex = 0) {
+  if (wsConnected || wsConnecting) return;
   wsStatus.textContent = "connecting";
-  ws = new WebSocket(wsCandidates[candidateIndex]);
-  attachSocketHandlers(ws, candidateIndex);
+  wsConnecting = true;
+  try {
+    ws = new WebSocket(wsCandidates[candidateIndex]);
+    attachSocketHandlers(ws, candidateIndex);
+  } catch (_) {
+    wsConnecting = false;
+    wsStatus.textContent = "disconnected";
+  }
 }
 
 async function refreshGeminiStatus() {
