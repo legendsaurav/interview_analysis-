@@ -80,8 +80,10 @@ Health check URL:
 ### 3) Deploy frontend on Vercel
 
 - Import GitHub repo in Vercel
-- Set Root Directory to `INTERVIEWER`
-- Vercel uses `vercel.json` included in this folder
+- Recommended: set Root Directory to `INTERVIEWER/frontend` for a pure static frontend deploy
+- Alternative: set Root Directory to `INTERVIEWER` and keep `vercel.json` active
+
+If the UI renders as plain HTML (unstyled), it usually means CSS/JS files are returning 404 due to a Root Directory mismatch. This project now serves frontend assets from root paths (`/styles.css`, `/app.js`, `/runtime-config.js`) and `vercel.json` rewrites those paths when deploying from `INTERVIEWER`.
 
 After deploy, edit `frontend/runtime-config.js` to point to backend:
 
