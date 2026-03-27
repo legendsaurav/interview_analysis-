@@ -1,4 +1,4 @@
 window.__INTERVIEW_CONFIG__ = {
-  backendUrl: "https://your-backend-domain.example.com",
+  backendUrl: "https://interviewer-u9l8.onrender.com",
   wsUrl: "",
 };
