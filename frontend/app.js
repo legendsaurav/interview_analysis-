@@ -11,6 +11,7 @@ function toWsUrlBase(httpBase) {
 
 const configuredBackendHttp = stripTrailingSlash(runtimeConfig.backendUrl || runtimeConfig.apiBase);
 const configuredBackendWs = stripTrailingSlash(runtimeConfig.wsUrl || runtimeConfig.websocketUrl);
+const HEALTH_ENDPOINT = "/health";
 
 function apiUrl(path) {
   const p = String(path || "");
@@ -37,8 +38,10 @@ if (configuredBackendWs) {
 if (configuredBackendHttp && !configuredBackendWs) {
   wsCandidatesRaw.push(`${toWsUrlBase(configuredBackendHttp)}/ws/interview`);
 }
-wsCandidatesRaw.push(`${wsProtocol}://${location.host}${basePath}/ws/interview`);
-wsCandidatesRaw.push(`${wsProtocol}://${location.host}/ws/interview`);
+if (!configuredBackendHttp && !configuredBackendWs) {
+  wsCandidatesRaw.push(`${wsProtocol}://${location.host}${basePath}/ws/interview`);
+  wsCandidatesRaw.push(`${wsProtocol}://${location.host}/ws/interview`);
+}
 const wsCandidates = [...new Set(wsCandidatesRaw)];
 
 let ws = null;
@@ -49,6 +52,7 @@ let pendingStartAfterReconnect = false;
 let wsReconnectAttempts = 0;
 let wsReconnectTimer = null;
 let wsConnecting = false;
+let wsBootstrapping = false;
 
 const startBtn = document.getElementById("startBtn");
 const nextBtn = document.getElementById("nextBtn");
@@ -143,6 +147,36 @@ function sendJson(payload) {
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify(payload));
   }
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+async function waitForBackendReady() {
+  if (!configuredBackendHttp) return true;
+
+  const attempts = 8;
+  for (let i = 0; i < attempts; i += 1) {
+    try {
+      const res = await fetch(apiUrl(HEALTH_ENDPOINT), {
+        cache: "no-store",
+        headers: { "Cache-Control": "no-store" },
+      });
+      if (res.ok) {
+        return true;
+      }
+    } catch (_) {
+      // Backend may be cold-starting. Keep retrying.
+    }
+
+    const sec = Math.min(10, 2 + i);
+    wsStatus.textContent = "waking";
+    setAlerts([`Backend is starting. Retrying websocket in ${sec}s...`]);
+    await sleep(sec * 1000);
+  }
+
+  return false;
 }
 
 function setAlerts(messages) {
@@ -754,6 +788,8 @@ async function startInterviewFlow() {
 }
 
 function attachSocketHandlers(socket, candidateIndex) {
+  const socketTarget = wsCandidates[candidateIndex] || "unknown";
+
   socket.onopen = () => {
     wsConnecting = false;
     wsReconnectAttempts = 0;
@@ -785,6 +821,7 @@ function attachSocketHandlers(socket, candidateIndex) {
 
   socket.onerror = () => {
     wsStatus.textContent = "connecting";
+    setAlerts([`WebSocket handshake failed for ${socketTarget}`]);
   };
 
   socket.onmessage = (event) => {
@@ -922,7 +959,7 @@ function attachSocketHandlers(socket, candidateIndex) {
     }
   };
 
-  socket.onclose = () => {
+  socket.onclose = (event) => {
     wsConnecting = false;
     wsConnected = false;
     wsStatus.textContent = manualSessionEnded ? "ended" : "disconnected";
@@ -940,7 +977,7 @@ function attachSocketHandlers(socket, candidateIndex) {
       wsReconnectAttempts += 1;
       wsStatus.textContent = "reconnecting";
       setAlerts([
-        `WebSocket disconnected. Retrying in ${Math.max(1, Math.round(delayMs / 1000))}s...`,
+        `WebSocket disconnected (${event.code || 1006}). Retrying in ${Math.max(1, Math.round(delayMs / 1000))}s...`,
       ]);
       if (wsReconnectTimer) {
         clearTimeout(wsReconnectTimer);
@@ -955,8 +992,25 @@ function attachSocketHandlers(socket, candidateIndex) {
   };
 }
 
-function connectSocket(candidateIndex = 0) {
-  if (wsConnected || wsConnecting) return;
+async function connectSocket(candidateIndex = 0) {
+  if (wsConnected || wsConnecting || wsBootstrapping) return;
+  if (!wsCandidates.length) {
+    wsStatus.textContent = "error";
+    setAlerts(["No websocket endpoint configured. Set backendUrl or wsUrl in runtime-config.js."]);
+    return;
+  }
+
+  if (candidateIndex === 0 && configuredBackendHttp) {
+    wsBootstrapping = true;
+    const ready = await waitForBackendReady();
+    wsBootstrapping = false;
+    if (!ready) {
+      wsStatus.textContent = "backend down";
+      setAlerts(["Backend is unavailable. Check Render service status and URL in runtime-config.js."]);
+      return;
+    }
+  }
+
   wsStatus.textContent = "connecting";
   wsConnecting = true;
   try {
