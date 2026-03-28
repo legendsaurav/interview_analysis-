@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import base64
 from collections import deque
-import importlib.util
 import json
 import os
 import re
@@ -85,15 +84,6 @@ DEBUG_RUNTIME: Dict[str, Any] = {
     "gemini_configured": GEMINI_ASSISTANT.configured,
     "last_final_report": {},
 }
-
-
-def _cors_config() -> Dict[str, Any]:
-    raw = os.getenv("INTERVIEW_ALLOWED_ORIGINS", "*").strip()
-    if not raw or raw == "*":
-        return {"allow_origins": ["*"], "allow_credentials": False}
-
-    origins = [x.strip() for x in raw.split(",") if x.strip()]
-    return {"allow_origins": origins or ["*"], "allow_credentials": bool(origins)}
 
 
 class GeminiConfigRequest(BaseModel):
@@ -635,11 +625,10 @@ async def _run_transcription_queue(runtime: "SessionRuntime", websocket: WebSock
 
 
 app = FastAPI(title="Realtime Interview System")
-_cors = _cors_config()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_cors["allow_origins"],
-    allow_credentials=bool(_cors["allow_credentials"]),
+    allow_origins=["*"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -679,16 +668,6 @@ async def index() -> FileResponse:
 async def favicon() -> Response:
     # Return empty favicon response to silence browser 404 retries.
     return Response(status_code=204)
-
-
-@app.get("/health")
-async def health() -> Dict[str, Any]:
-    return {
-        "ok": True,
-        "service": "interviewer-backend",
-        "gemini_configured": GEMINI_ASSISTANT.configured,
-        "stt_whisper_available": importlib.util.find_spec("faster_whisper") is not None,
-    }
 
 
 @app.get("/debug/ingest")

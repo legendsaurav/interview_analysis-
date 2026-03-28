@@ -1,23 +1,4 @@
 const wsProtocol = location.protocol === "https:" ? "wss" : "ws";
-const runtimeConfig = window.__INTERVIEW_CONFIG__ || {};
-
-function stripTrailingSlash(value) {
-  return String(value || "").trim().replace(/\/+$/, "");
-}
-
-function toWsUrlBase(httpBase) {
-  return String(httpBase || "").replace(/^http:/i, "ws:").replace(/^https:/i, "wss:");
-}
-
-const configuredBackendHttp = stripTrailingSlash(runtimeConfig.backendUrl || runtimeConfig.apiBase);
-const configuredBackendWs = stripTrailingSlash(runtimeConfig.wsUrl || runtimeConfig.websocketUrl);
-const HEALTH_ENDPOINT = "/health";
-
-function apiUrl(path) {
-  const p = String(path || "");
-  if (/^https?:\/\//i.test(p)) return p;
-  return configuredBackendHttp ? `${configuredBackendHttp}${p}` : p;
-}
 
 function deriveBasePath() {
   const path = window.location.pathname || "/";
@@ -31,28 +12,16 @@ function deriveBasePath() {
 }
 
 const basePath = deriveBasePath();
-const wsCandidatesRaw = [];
-if (configuredBackendWs) {
-  wsCandidatesRaw.push(`${configuredBackendWs}/ws/interview`);
-}
-if (configuredBackendHttp && !configuredBackendWs) {
-  wsCandidatesRaw.push(`${toWsUrlBase(configuredBackendHttp)}/ws/interview`);
-}
-if (!configuredBackendHttp && !configuredBackendWs) {
-  wsCandidatesRaw.push(`${wsProtocol}://${location.host}${basePath}/ws/interview`);
-  wsCandidatesRaw.push(`${wsProtocol}://${location.host}/ws/interview`);
-}
-const wsCandidates = [...new Set(wsCandidatesRaw)];
+const wsCandidates = [
+  `${wsProtocol}://${location.host}${basePath}/ws/interview`,
+  `${wsProtocol}://${location.host}/ws/interview`,
+];
 
 let ws = null;
 let wsConnected = false;
 let sessionId = null;
 let manualSessionEnded = false;
 let pendingStartAfterReconnect = false;
-let wsReconnectAttempts = 0;
-let wsReconnectTimer = null;
-let wsConnecting = false;
-let wsBootstrapping = false;
 
 const startBtn = document.getElementById("startBtn");
 const nextBtn = document.getElementById("nextBtn");
@@ -147,36 +116,6 @@ function sendJson(payload) {
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify(payload));
   }
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
-}
-
-async function waitForBackendReady() {
-  if (!configuredBackendHttp) return true;
-
-  const attempts = 8;
-  for (let i = 0; i < attempts; i += 1) {
-    try {
-      const res = await fetch(apiUrl(HEALTH_ENDPOINT), {
-        cache: "no-store",
-        headers: { "Cache-Control": "no-store" },
-      });
-      if (res.ok) {
-        return true;
-      }
-    } catch (_) {
-      // Backend may be cold-starting. Keep retrying.
-    }
-
-    const sec = Math.min(10, 2 + i);
-    wsStatus.textContent = "waking";
-    setAlerts([`Backend is starting. Retrying websocket in ${sec}s...`]);
-    await sleep(sec * 1000);
-  }
-
-  return false;
 }
 
 function setAlerts(messages) {
@@ -321,7 +260,7 @@ async function saveGeminiApiKey() {
     return;
   }
   try {
-    const res = await fetch(apiUrl("/ai/gemini/config"), {
+    const res = await fetch("/ai/gemini/config", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ api_key: key }),
@@ -346,7 +285,7 @@ async function analyzeTranscriptFile() {
     return;
   }
   try {
-    const res = await fetch(apiUrl("/analysis/transcript-file"), {
+    const res = await fetch("/analysis/transcript-file", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ transcript_path: currentTranscriptLogFile, session_id: sessionId }),
@@ -736,7 +675,7 @@ function startTranscriptSync() {
     }
 
     // Fallback sync path: HTTP, keeps backend transcript visible even if WS path is flaky.
-    fetch(apiUrl("/debug/ingest/transcript"), {
+    fetch("/debug/ingest/transcript", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text: liveText, final: false, source: "frontend_sync_timer", session_id: sessionId }),
@@ -757,8 +696,6 @@ async function startInterviewFlow() {
       setAlerts(["Reconnecting... starting interview when ready."]);
       return;
     }
-    pendingStartAfterReconnect = true;
-    connectSocket();
     setAlerts(["Waiting for server websocket..."]);
     return;
   }
@@ -788,15 +725,7 @@ async function startInterviewFlow() {
 }
 
 function attachSocketHandlers(socket, candidateIndex) {
-  const socketTarget = wsCandidates[candidateIndex] || "unknown";
-
   socket.onopen = () => {
-    wsConnecting = false;
-    wsReconnectAttempts = 0;
-    if (wsReconnectTimer) {
-      clearTimeout(wsReconnectTimer);
-      wsReconnectTimer = null;
-    }
     wsConnected = true;
     wsStatus.textContent = "connected";
     if (!isRunning) {
@@ -817,11 +746,6 @@ function attachSocketHandlers(socket, candidateIndex) {
       pendingStartAfterReconnect = false;
       startInterviewFlow();
     }
-  };
-
-  socket.onerror = () => {
-    wsStatus.textContent = "connecting";
-    setAlerts([`WebSocket handshake failed for ${socketTarget}`]);
   };
 
   socket.onmessage = (event) => {
@@ -959,8 +883,7 @@ function attachSocketHandlers(socket, candidateIndex) {
     }
   };
 
-  socket.onclose = (event) => {
-    wsConnecting = false;
+  socket.onclose = () => {
     wsConnected = false;
     wsStatus.textContent = manualSessionEnded ? "ended" : "disconnected";
     if (manualSessionEnded) {
@@ -973,58 +896,22 @@ function attachSocketHandlers(socket, candidateIndex) {
     if (candidateIndex + 1 < wsCandidates.length) {
       connectSocket(candidateIndex + 1);
     } else {
-      const delayMs = Math.min(20000, 1200 * Math.pow(1.8, Math.min(wsReconnectAttempts, 8)));
-      wsReconnectAttempts += 1;
-      wsStatus.textContent = "reconnecting";
-      setAlerts([
-        `WebSocket disconnected (${event.code || 1006}). Retrying in ${Math.max(1, Math.round(delayMs / 1000))}s...`,
-      ]);
-      if (wsReconnectTimer) {
-        clearTimeout(wsReconnectTimer);
-      }
-      wsReconnectTimer = window.setTimeout(() => {
-        wsReconnectTimer = null;
-        if (!manualSessionEnded && !wsConnected) {
-          connectSocket(0);
-        }
-      }, delayMs);
+      isRunning = false;
+      cleanupMedia();
+      setAlerts(["WebSocket disconnected"]);
     }
   };
 }
 
-async function connectSocket(candidateIndex = 0) {
-  if (wsConnected || wsConnecting || wsBootstrapping) return;
-  if (!wsCandidates.length) {
-    wsStatus.textContent = "error";
-    setAlerts(["No websocket endpoint configured. Set backendUrl or wsUrl in runtime-config.js."]);
-    return;
-  }
-
-  if (candidateIndex === 0 && configuredBackendHttp) {
-    wsBootstrapping = true;
-    const ready = await waitForBackendReady();
-    wsBootstrapping = false;
-    if (!ready) {
-      wsStatus.textContent = "backend down";
-      setAlerts(["Backend is unavailable. Check Render service status and URL in runtime-config.js."]);
-      return;
-    }
-  }
-
+function connectSocket(candidateIndex = 0) {
   wsStatus.textContent = "connecting";
-  wsConnecting = true;
-  try {
-    ws = new WebSocket(wsCandidates[candidateIndex]);
-    attachSocketHandlers(ws, candidateIndex);
-  } catch (_) {
-    wsConnecting = false;
-    wsStatus.textContent = "disconnected";
-  }
+  ws = new WebSocket(wsCandidates[candidateIndex]);
+  attachSocketHandlers(ws, candidateIndex);
 }
 
 async function refreshGeminiStatus() {
   try {
-    const res = await fetch(apiUrl("/ai/gemini/status"));
+    const res = await fetch("/ai/gemini/status");
     const data = await res.json();
     if (geminiStatusEl) {
       geminiStatusEl.textContent = data.configured

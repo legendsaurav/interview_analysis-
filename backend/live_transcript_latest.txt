@@ -1,0 +1,3 @@
+This file is deprecated for shared writes.
+Active session latest transcript file:
+D:\New\yolo_yolov5\INTERVIEWER\backend\session_transcripts\live_transcript_latest_1774673707837_bab751e8b6.txt
