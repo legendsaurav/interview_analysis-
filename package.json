@@ -1,0 +1,18 @@
+{
+  "name": "interviewer-webapp",
+  "version": "1.0.0",
+  "description": "Guest interview web app with VoiceRSS + SadTalker pipeline",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "generate:interview-batch": "python scripts/generate_interview_batch.py"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2"
+  }
+}

@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Interview Generator Controller</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main class="card">
+    <h1>AI Interview Generator</h1>
+
+    <section class="config-section">
+      <label for="studioUrlInput">Lightning Studio URL</label>
+      <input id="studioUrlInput" type="url" placeholder="https://lightning.ai/2024epb1279/financial-llm-training-project/studios/proud-aquamarine-362uf/code" />
+
+      <label for="projectNameInput">Project Name (optional)</label>
+      <input id="projectNameInput" type="text" placeholder="proud-aquamarine-362uf" />
+
+      <label for="commandsInput">Terminal Commands (one per line)</label>
+      <textarea id="commandsInput" rows="4" placeholder="python app.py&#10;npm run start"></textarea>
+    </section>
+
+    <button id="turnOnBtn" class="primary-btn" type="button">TURN ON</button>
+
+    <section class="status-section">
+      <div class="status-row">
+        <span class="status-label">Status</span>
+        <span id="statusText" class="status-value">Idle</span>
+      </div>
+      <div class="detail-row">
+        <span id="detailText" class="detail-text">Waiting for action.</span>
+        <span id="spinner" class="spinner hidden" aria-hidden="true"></span>
+      </div>
+      <p id="studioText" class="studio-text">Studio automation: Idle</p>
+    </section>
+
+    <section id="resultSection" class="result-section hidden">
+      <p class="result-title">Interview Ready</p>
+      <a id="resultLink" href="#" target="_blank" rel="noopener noreferrer">Open Interview Video</a>
+    </section>
+  </main>
+
+  <script src="popup.js" defer></script>
+</body>
+</html>

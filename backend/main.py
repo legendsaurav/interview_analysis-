@@ -1,3 +1,56 @@
+import subprocess
+from fastapi import APIRouter
+
+router = APIRouter()
+
+# --- Git Pull Endpoint for Lightning AI SadTalker Model ---
+@router.post("/api/git/pull")
+async def git_pull():
+    """
+    Pulls the latest changes from the remote GitHub repository.
+    """
+    try:
+        result = subprocess.run(["git", "pull"], cwd=str(BASE_DIR.parent), capture_output=True, text=True, timeout=20)
+        return {"ok": result.returncode == 0, "stdout": result.stdout, "stderr": result.stderr}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+# --- Git Status Endpoint ---
+@router.get("/api/git/status")
+async def git_status():
+    try:
+        result = subprocess.run(["git", "status", "-sb"], cwd=str(BASE_DIR.parent), capture_output=True, text=True, timeout=10)
+        return {"ok": result.returncode == 0, "stdout": result.stdout, "stderr": result.stderr}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+# Register router
+app.include_router(router)
+GITHUB_RAW_URL = "https://raw.githubusercontent.com/legendsaurav/changer/main/live_transcript_latest.txt"
+
+async def fetch_transcript_from_github() -> str:
+    """
+    Fetches the transcript text file from the GitHub repo.
+    """
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.get(GITHUB_RAW_URL)
+        resp.raise_for_status()
+        return resp.text
+
+async def load_transcript_lines_from_github() -> list[str]:
+    text = await fetch_transcript_from_github()
+    lines = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if "[FINAL]" in line:
+            payload = re.sub(r"^\[[^\]]+\]\s+\[[^\]]+\]\s+\[[^\]]+\]\s*", "", line).strip()
+            if payload:
+                lines.append(payload)
+        elif "[PARTIAL]" not in line and len(line.split()) >= 4:
+            lines.append(line)
+    return lines
 from __future__ import annotations
 
 import asyncio
@@ -6,6 +59,7 @@ from collections import deque
 import json
 import os
 import re
+import shutil
 import time
 from pathlib import Path
 from typing import Any, Deque, Dict, List, Optional
@@ -14,7 +68,42 @@ import uuid
 import cv2
 import numpy as np
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
+import httpx
+# --- Bridge Model ---
+from pydantic import BaseModel
+class InterviewerSelection(BaseModel):
+    interviewer_id: str
+    interviewer_name: str
+    user_id: str | None = None
+    extra: dict = {}
+
+# --- Bridge Endpoint ---
+app = FastAPI(title="Realtime Interview System")
+
+@app.post("/api/interview/select")
+async def select_interviewer(payload: InterviewerSelection, request: Request):
+    """
+    Receives interviewer selection and forwards to INTERVIEWER and lost backends.
+    """
+    # Prevent infinite loop: only forward if not already from another backend
+    source = request.headers.get("X-Bridge-Source", "yolo_yolov5")
+    results = {}
+    if source != "INTERVIEWER":
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.post("http://localhost:8000/api/interview/select", json=payload.dict(), headers={"X-Bridge-Source": "yolo_yolov5"})
+                results["INTERVIEWER"] = resp.json()
+        except Exception as e:
+            results["INTERVIEWER"] = {"error": str(e)}
+    if source != "lost":
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.post("http://localhost:8787/api/interview/select", json=payload.dict(), headers={"X-Bridge-Source": "yolo_yolov5"})
+                results["lost"] = resp.json()
+        except Exception as e:
+            results["lost"] = {"error": str(e)}
+    return {"ok": True, "forwarded": results, "received": payload.dict()}
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from fastapi.responses import FileResponse
@@ -55,8 +144,8 @@ SESSION_TRANSCRIPTS_DIR = BASE_DIR / "session_transcripts"
 LEGACY_TRANSCRIPT_LATEST_PATH = BASE_DIR / "live_transcript_latest.txt"
 LEGACY_TRANSCRIPT_LOG_PATH = BASE_DIR / "live_transcript_log.txt"
 CLIPS_DIR = BASE_DIR / "clips"
-CHAT_TTL_SECONDS = 5 * 60
-TRANSCRIPT_RETENTION_SECONDS = int(os.getenv("INTERVIEW_TRANSCRIPT_TTL_SECONDS", str(24 * 60 * 60)))
+CHAT_TTL_SECONDS = int(os.getenv("INTERVIEW_CHAT_TTL_SECONDS", str(5 * 60)))
+TRANSCRIPT_RETENTION_SECONDS = int(os.getenv("INTERVIEW_TRANSCRIPT_TTL_SECONDS", str(CHAT_TTL_SECONDS)))
 
 DEBUG_EVENTS: Deque[Dict[str, Any]] = deque(maxlen=250)
 SESSION_TRANSCRIPT_FILES: Dict[int, Dict[str, Any]] = {}
@@ -132,6 +221,22 @@ def _cleanup_expired_session_transcript_files(now: float | None = None) -> None:
         SESSION_TRANSCRIPT_FILES.pop(session_id, None)
 
 
+def _cleanup_transcript_files_on_disk(now: float | None = None) -> None:
+    current = time.time() if now is None else now
+    cutoff = _transcript_cutoff_ts(current)
+    if not SESSION_TRANSCRIPTS_DIR.exists():
+        return
+
+    for p in SESSION_TRANSCRIPTS_DIR.glob("live_transcript_*.txt"):
+        try:
+            if not p.is_file():
+                continue
+            if p.stat().st_mtime < cutoff:
+                p.unlink()
+        except Exception:
+            pass
+
+
 def _cleanup_expired_session_clips(now: float | None = None) -> None:
     current = time.time() if now is None else now
     cutoff = _chat_cutoff_ts(current)
@@ -158,12 +263,30 @@ def _cleanup_expired_session_clips(now: float | None = None) -> None:
         SESSION_CLIP_DIRS.pop(session_id, None)
 
 
+def _cleanup_clip_dirs_on_disk(now: float | None = None) -> None:
+    current = time.time() if now is None else now
+    cutoff = _chat_cutoff_ts(current)
+    if not CLIPS_DIR.exists():
+        return
+
+    for p in CLIPS_DIR.iterdir():
+        try:
+            if not p.is_dir():
+                continue
+            if p.stat().st_mtime < cutoff:
+                shutil.rmtree(p, ignore_errors=True)
+        except Exception:
+            pass
+
+
 async def _cleanup_loop() -> None:
     while True:
         now = time.time()
         _prune_debug_events(now)
         _cleanup_expired_session_transcript_files(now)
+        _cleanup_transcript_files_on_disk(now)
         _cleanup_expired_session_clips(now)
+        _cleanup_clip_dirs_on_disk(now)
         await asyncio.sleep(15)
 
 
@@ -641,6 +764,9 @@ async def _startup_cleanup_task() -> None:
     CLIPS_DIR.mkdir(parents=True, exist_ok=True)
     _prune_debug_events()
     _cleanup_expired_session_transcript_files()
+    _cleanup_transcript_files_on_disk()
+    _cleanup_expired_session_clips()
+    _cleanup_clip_dirs_on_disk()
     CLEANUP_TASK = asyncio.create_task(_cleanup_loop())
 
 
@@ -662,6 +788,21 @@ if FRONTEND_DIR.exists():
 @app.get("/")
 async def index() -> FileResponse:
     return FileResponse(str(FRONTEND_DIR / "index.html"))
+
+
+@app.get("/styles.css", include_in_schema=False)
+async def frontend_styles() -> FileResponse:
+    return FileResponse(str(FRONTEND_DIR / "styles.css"))
+
+
+@app.get("/app.js", include_in_schema=False)
+async def frontend_app_js() -> FileResponse:
+    return FileResponse(str(FRONTEND_DIR / "app.js"))
+
+
+@app.get("/runtime-config.js", include_in_schema=False)
+async def frontend_runtime_config() -> FileResponse:
+    return FileResponse(str(FRONTEND_DIR / "runtime-config.js"))
 
 
 @app.get("/favicon.ico", include_in_schema=False)
@@ -688,19 +829,27 @@ async def debug_final_report() -> Dict[str, Any]:
 @app.get("/ai/gemini/status")
 async def gemini_status() -> Dict[str, Any]:
     return {
-        "configured": GEMINI_ASSISTANT.configured,
+        "configured": bool(DEBUG_RUNTIME.get("gemini_configured", False)),
         "model": GEMINI_ASSISTANT.model,
+        "last_error": GEMINI_ASSISTANT.last_error,
     }
 
 
 @app.post("/ai/gemini/config")
 async def gemini_config(payload: GeminiConfigRequest) -> Dict[str, Any]:
-    ok = GEMINI_ASSISTANT.configure_api_key(payload.api_key)
-    DEBUG_RUNTIME["gemini_configured"] = ok
+    key_set = GEMINI_ASSISTANT.configure_api_key(payload.api_key)
+    verified = False
+    if key_set:
+        verified = await asyncio.to_thread(GEMINI_ASSISTANT.verify_connection)
+        if not verified:
+            GEMINI_ASSISTANT.configure_api_key("")
+
+    DEBUG_RUNTIME["gemini_configured"] = bool(verified)
     return {
-        "ok": ok,
-        "configured": GEMINI_ASSISTANT.configured,
+        "ok": bool(verified),
+        "configured": bool(verified),
         "model": GEMINI_ASSISTANT.model,
+        "last_error": GEMINI_ASSISTANT.last_error,
     }
 
 

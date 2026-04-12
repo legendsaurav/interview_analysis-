@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Career Booster Interview</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Fraunces:opsz,wght@9..144,700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="page-shell">
+      <section class="card auth-card" id="authCard">
+        <p class="eyebrow">Career Booster Portal</p>
+        <h1>Practice with a talking AI interviewer.</h1>
+        <p class="subcopy">
+          Enter as guest to open your interview room. Your message will be converted to speech and played
+          as interview audio.
+        </p>
+        <button id="guestLoginBtn" class="btn-primary" type="button">Guest Login</button>
+      </section>
+
+      <section class="card interview-card hidden" id="interviewSection">
+        <div class="interview-grid">
+          <div class="portrait-wrap">
+            <img id="interviewerImage" src="/interviewer.svg" alt="Interviewer" />
+            <p class="portrait-label">Static interviewer image</p>
+          </div>
+
+          <div class="interview-panel">
+            <h2>Interview Section</h2>
+            <form id="interviewForm">
+              <label for="interviewText">What should the interviewer say?</label>
+              <textarea
+                id="interviewText"
+                name="interviewText"
+                placeholder="Type your interview prompt here..."
+                required
+              ></textarea>
+              <p id="requestSizeInfo" class="request-size" aria-live="polite"></p>
+              <button id="generateBtn" class="btn-primary" type="submit">Generate Interview Audio</button>
+            </form>
+
+            <p id="statusText" class="status" aria-live="polite"></p>
+
+            <div class="video-wrap hidden" id="audioWrap">
+              <audio id="resultAudio" controls></audio>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

@@ -1,47 +1,120 @@
-# Realtime AI Interview System
+# Interview Website (Guest Login + VoiceRSS + SadTalker)
 
-This module adds a local, CPU-friendly, real-time interview pipeline with synchronized audio + video analysis.
+This project implements:
 
-## Structure
+User Interface (Website) -> Backend API (Node.js) -> SadTalker -> Generated Talking Video
 
-- `frontend/index.html`
-- `frontend/app.js`
-- `frontend/styles.css`
-- `backend/main.py`
-- `backend/audio_processor.py`
-- `backend/vision_processor.py`
-- `backend/state_machine.py`
-- `backend/yolo_model.py`
+## What it does
 
-## Features
+1. Shows a **Guest Login** entry point.
+2. Opens an **Interview section** with a static interviewer image.
+3. Accepts user text input.
+4. Converts text to speech using **VoiceRSS API**.
+5. Sends generated audio + interviewer image to **SadTalker**.
+6. Displays generated talking video directly in the same Interview section.
 
-- WebSocket streaming for microphone PCM audio and webcam JPEG frames
-- Real-time speech state (`speaking`, `paused`, `finished`) with silence-end detection
-- Optional Whisper transcription using `faster-whisper`
-- MediaPipe face behavior analysis:
-  - eye-contact proxy score
-  - head stability score
-  - gaze direction
-- YOLOv8 object detection with frame skipping:
-  - phone detection alert
-  - multiple-person alert
-- Interview state machine:
-  - `IDLE`, `ASKING_QUESTION`, `LISTENING`, `PROCESSING`, `RESPONDING`
-- Live frontend indicators and browser TTS responses
+## Tech stack
 
-## Run
+- Frontend: HTML/CSS/JS in `public/`
+- Backend: Node.js + Express (`server.js`)
+- TTS: VoiceRSS API
+- Talking head: SadTalker (Python model)
 
-From the `INTERVIEWER` directory:
+## Setup
 
-```powershell
-pip install -r requirements.txt
-uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+### 1) Install Node dependencies
+
+```bash
+npm install
 ```
 
-Open `http://127.0.0.1:8000`.
+
+---
+
+# SadTalker Lightning-ready Minimal Repo
+
+This repository contains the SadTalker code (without large model files) for easy deployment and use on Lightning AI or other platforms.
+
+## Lightning/Cloud Setup
+
+1. **Clone this repository**
+2. **Install requirements**
+  ```sh
+  pip install -r requirements.txt
+  ```
+3. **Download model weights**
+  ```sh
+  python download_checkpoints.py
+  ```
+  - This will fetch the required model files into `SadTalker/checkpoints/`.
+  - You can edit `download_checkpoints.py` to add more files or update links.
+4. **Run inference**
+  ```sh
+  python SadTalker/inference.py --source_image <your_image> --driven_audio <your_audio> ...
+  ```
+
+## Notes
+- Large files (models, generated videos, etc.) are not included in the repo and are ignored by `.gitignore`.
+- You can add your own images/audio to the appropriate folders.
+- For Lightning AI, you can add a `lightning_app.py` or notebook for cloud demos.
+
+## Credits
+- Based on [SadTalker](https://github.com/OpenTalker/SadTalker)
+
+---
+
+### 2) Configure environment
+
+Copy `.env.example` to `.env` and edit if needed.
+
+Important values:
+
+- `VOICERSS_API_KEY`
+- `SADTALKER_DIR`: path to your SadTalker repo clone
+- `PYTHON_EXECUTABLE`: python command for the SadTalker environment
+- `INTERVIEWER_IMAGE`: source image path (defaults to `./public/interviewer.svg`)
+
+### 3) Prepare SadTalker
+
+Clone and set up SadTalker separately, then point `SADTALKER_DIR` to that directory.
+
+Example requirements:
+
+- `inference.py` exists inside `SADTALKER_DIR`
+- all SadTalker model checkpoints are downloaded
+- Python environment includes SadTalker dependencies
+
+### 4) Run app
+
+```bash
+npm start
+```
+
+Open: `http://localhost:3000`
+
+## API
+
+### `POST /api/interview/generate`
+
+Request body:
+
+```json
+{
+  "text": "Tell me about yourself"
+}
+```
+
+Response:
+
+```json
+{
+  "ok": true,
+  "videoUrl": "/generated/<id>.mp4"
+}
+```
 
 ## Notes
 
-- Designed to run on CPU; no external GPU service required.
-- Uses `../yolov8n.pt` by default from repository root.
-- If Whisper model load fails, speech-state tracking still runs and transcript can remain empty.
+- If SadTalker path or environment is invalid, backend returns a detailed error.
+- Temporary audio/intermediate files are cleaned automatically.
+- Generated videos are saved in `public/generated/` for browser playback.

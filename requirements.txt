@@ -6,3 +6,4 @@ opencv-python>=4.8.0
 mediapipe>=0.10.0
 ultralytics>=8.2.0
 faster-whisper>=1.0.0
+gdown

@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "AI Interview Generator Controller",
+  "version": "1.0.0",
+  "description": "Trigger interview generation jobs and notify when videos are ready.",
+  "permissions": ["storage", "notifications", "activeTab", "scripting", "tabs", "debugger"],
+  "host_permissions": [
+    "http://localhost:3000/*",
+    "https://lightning.ai/*",
+    "https://*.lightning.ai/*"
+  ],
+  "action": {
+    "default_title": "AI Interview Generator Controller",
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  }
+}
